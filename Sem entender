@@ -1,0 +1,460 @@
+---------------------------------------------------------------------------
+
+implementation 'com.google.android.gms:play-services-location:20.0.0'
+implementation 'com.google.android.gms:play-services-maps:18.1.0'
+implementation("androidx.fragment:fragment-ktx:1.5.3")
+implementation 'androidx.lifecycle:lifecycle-extensions:2.2.0'
+implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.5.1'
+implementation 'com.google.android.gms:play-services-maps:18.1.0'
+    
+---------------------------------------------------------------------------
+
+tools:targetApi="s"
+
+---------------------------------------------------------------------------
+
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+---------------------------------------------------------------------------
+
+import android.Manifest.permission.ACCESS_COARSE_LOCATION
+import android.Manifest.permission.ACCESS_FINE_LOCATION
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.location.Geocoder
+import android.location.Location
+import android.location.LocationManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import android.util.Log
+import android.widget.Button
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import com.google.android.gms.location.*
+import java.text.SimpleDateFormat
+import java.util.*
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var textViewSbdInt: TextView
+    private lateinit var textViewStatusRel: TextView
+    private lateinit var textViewCityCountry: TextView
+    private lateinit var getpos: Button
+
+    //Declaring the needed Variables
+    private lateinit var fusedLocationProviderClient: FusedLocationProviderClient
+    private val permissionIdFineLocation = 1010
+    private val permissionIdCoarseLocation = 2020
+
+    private val registerActivity = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+        if (permissions[ACCESS_FINE_LOCATION] == true) {
+            checkGPSEnableOrDisable()
+        } else {
+            if (permissions[ACCESS_FINE_LOCATION] == false) {
+                if (ActivityCompat.shouldShowRequestPermissionRationale(this, ACCESS_FINE_LOCATION)) {
+                    // apenas negou
+                    alertFineLocationDenied()
+                } else {
+                    // negou definitivamente
+                    alertFineLocationDeniedDefinitely()
+                }
+            }
+        }
+    }
+
+    @SuppressLint("SourceLockedOrientationActivity")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        // Sem actionBar
+        supportActionBar?.hide()
+
+        /*
+        // private lateinit var sensorManager: SensorManager
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val deviceSensors : List<Sensor> = sensorManager.getSensorList(Sensor.TYPE_ALL)
+        Log.d("TAG", "MainActivity - Sensor $deviceSensors")
+         */
+
+        /*
+        val stringProvider : String = Settings.Secure.getString(contentResolver, Settings.Secure.LOCATION_PROVIDERS_ALLOWED)
+        // val stringProvider : String = Settings.Secure.getString(contentResolver, Settings.Secure.LOCATION_PROVIDERS_ALLOWED)
+        Log.d("TAG", "MainActivity - Sensor $stringProvider") // retourn as ----> Sensor network, gps
+        */
+
+        // Modo Retrato (Tela em pé)
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
+        textViewSbdInt = findViewById(R.id.textViewSbdInt)
+        textViewStatusRel = findViewById(R.id.textViewStatusRel)
+        textViewCityCountry = findViewById(R.id.textViewCityCountry)
+        getpos = findViewById(R.id.getpos)
+
+        // testar vesão usada no momento no Emulador
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2) {
+            Log.d("TAG", "Versão 33")
+            textViewSbdInt.text = Build.VERSION.SDK_INT.toString()
+        } else {
+            Log.d("TAG", "MainActivity - Versão atual: " + Build.VERSION.SDK_INT.toString())
+            textViewSbdInt.text = Build.VERSION.SDK_INT.toString()
+        }
+
+        registerActivity.launch(arrayOf(ACCESS_FINE_LOCATION))
+        // this, arrayOf(ACCESS_FINE_LOCATION), permissionIdFineLocation
+
+        fusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(this)
+        getpos.setOnClickListener {
+            Log.d("Debug - check permission:", checkPermission().toString())
+            Log.d("Debug - Gps:", isLocationEnabled().toString())
+            /*
+            if (!isLocationEnabled()) {
+                buildAlertMessageNoGps()
+            }
+             */
+            if (!checkPermission()) {
+                requestPermission()
+            }
+            /*
+            fusedLocationProviderClient.lastLocation.addOnSuccessListener{location: Location? ->
+            textView.text = location?.latitude.toString() + "," + location?.longitude.toString()
+             }
+             */
+            getLastLocation()
+        }
+
+
+        // fim do onCreate
+    }
+
+    @SuppressLint("SetTextI18n", "SimpleDateFormat")
+    fun getLastLocation() {
+        if (checkPermission()) {
+            if (isLocationEnabled()) {
+                if (ActivityCompat.checkSelfPermission(this, ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+                    ActivityCompat.checkSelfPermission(this, ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                    // TODO: Consider calling
+                    //    ActivityCompat#requestPermissions
+                    // aqui para solicitar as permissões ausentes e, em seguida, substituir
+                    // public void onRequestPermissionsResult(int requestCode, String[] permissions,
+                    // int[] grantResults)
+                    // para lidar com o caso em que o usuário concede a permissão. Veja a documentação
+                    // para ActivityCompat#requestPermissions para obter mais detalhes.
+                    return
+                }
+                fusedLocationProviderClient.lastLocation.addOnCompleteListener { task ->
+                    val location: Location? = task.result
+                    if (location == null) {
+                        newLocationData()
+                    } else {
+                        Log.d("Debug:", "Your Location:" + location.longitude + " - " + location.longitude)
+                        if (getCityCountryName(location.latitude, location.longitude).contains("Erro")) {
+                            try {
+                                newLocationData()
+                                Log.d("TAG", "try - Erro na localização 2")
+                            } catch (e : Exception) {
+                                Log.d("TAG", "catch - Erro na localização 2" + e.message.toString())
+                            }
+                            textViewStatusRel.text = "Erro na localização 2"
+                        } else {
+                            textViewCityCountry.text = getCityCountryName(location.latitude, location.longitude)
+                            // textView.text = "Long: " + location.longitude + " , Lat: " + location.latitude + "\n" + getCityName(location.latitude, location.longitude)
+                            val date: Date = Calendar.getInstance().time
+                            val sdf = SimpleDateFormat("E - dd/MMM - HH:mm:ss")
+                            textViewStatusRel.text = "" + sdf.format(date).toString() + " hs"
+                        }
+                    }
+                }
+            } else {
+                checkGPSEnableOrDisable()
+                Toast.makeText(this, "Please Turn on Your device Location", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            requestPermission()
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun checkGPSEnableOrDisable() {
+        // checar GPS habilitado ou desabilitado
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        if (!locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+            !locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            buildAlertMessageNoGps()
+            textViewStatusRel.text = "GPS desativado"
+        } else {
+            // iniciar código de localização
+            if (ActivityCompat.checkSelfPermission(this, ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+                && ActivityCompat.checkSelfPermission(this, ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                return
+            }
+            getLastLocation()
+            textViewStatusRel.text = "GPS ativo"
+        }
+    }
+
+    private fun newLocationData() {
+        val locationRequest = LocationRequest.create()
+        // locationRequest.priority = Priority.PRIORITY_HIGH_ACCURACY
+        locationRequest.priority = Priority.PRIORITY_BALANCED_POWER_ACCURACY
+        locationRequest.interval = 0
+        locationRequest.fastestInterval = 0
+        locationRequest.numUpdates = 1
+        fusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(this)
+        if (ActivityCompat.checkSelfPermission(this, ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
+            && ActivityCompat.checkSelfPermission(this, ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // aqui para solicitar as permissões ausentes e, em seguida, substituir
+            // public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            // int[] grantResults)
+            // para lidar com o caso em que o usuário concede a permissão. Veja a documentação
+            // para ActivityCompat#requestPermissions para obter mais detalhes.
+            return
+        }
+        fusedLocationProviderClient.requestLocationUpdates(locationRequest, locationCallback, Looper.myLooper())
+    }
+
+    private val locationCallback = object : LocationCallback() {
+        @SuppressLint("SetTextI18n")
+        override fun onLocationResult(locationResult: LocationResult) {
+            val lastLocation: Location = locationResult.lastLocation!!
+            Log.d("Debug:", "Main Activity - last location: " + lastLocation.longitude.toString())
+            //textView.text = "Location is : Long: " + lastLocation.longitude + " , Lat: " + lastLocation.latitude + "\n" +
+                    //getCityName(lastLocation.latitude, lastLocation.longitude) + " - " + getCountryName(lastLocation.latitude, lastLocation.longitude)
+        }
+    }
+
+    private fun checkPermission(): Boolean {
+        // esta função retornará um booleano
+        // true: se tivermos permissão
+        // falso se não
+        if (
+            ActivityCompat.checkSelfPermission(this, ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ActivityCompat.checkSelfPermission(this, ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            return true
+        }
+        return false
+    }
+
+    private fun requestPermission() {
+        //this function will allows us to tell the user to requesut the necessary permsiion if they are not garented
+        ActivityCompat.requestPermissions(this, arrayOf(ACCESS_FINE_LOCATION), permissionIdFineLocation)
+    }
+
+    private fun isLocationEnabled(): Boolean {
+        // esta função nos retornará o estado do serviço de localização
+        // se o gps ou o provedor de rede estiver habilitado, ele retornará true, caso contrário, retornará false
+        val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == permissionIdFineLocation) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d("Debug:", "Main Activity - Está permitida ACCESS_FINBE_LOCATION")
+            }
+        }
+        if (requestCode == permissionIdCoarseLocation) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d("Debug:", "You have the Permission coarse Location")
+            }
+        }
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun getCityCountryName(lat: Double, long: Double): String {
+        val geoCoder = Geocoder(this, Locale.getDefault())
+        try {
+            val address = geoCoder.getFromLocation(lat, long, 1)
+            val stringCity = address[0].subAdminArea.toString()
+            Log.d("Debug:", "City: $stringCity")
+            val stringCountryName = address[0].countryName.toString()
+            Log.d("Debug:", "City: $stringCountryName")
+            if (lat.toString().isNotEmpty() && long.toString().isNotEmpty()) {
+                Log.d("TAG", "MainActivity - City ---> OK $stringCity")
+                textViewCityCountry.text = stringCity
+                textViewCityCountry.text = stringCountryName
+                Handler(Looper.getMainLooper()).postDelayed({
+                    fusedLocationProviderClient.removeLocationUpdates(locationCallback)
+                    Toast.makeText(this@MainActivity, "call back removido", Toast.LENGTH_SHORT).show()
+                }, 6000)
+            } else {
+                textViewCityCountry.text = "Sem cidade"
+                textViewCityCountry.text = "Sem País"
+            }
+            return "$stringCity - $stringCountryName"
+        } catch (e:Exception) {
+            Log.d("TAG", "Main Activity - Erro GeoCoder" + e.message.toString())
+        }
+        return "Erro na localização"
+    }
+
+    private fun buildAlertMessageNoGps() {
+        val builder = AlertDialog.Builder(this)
+        builder.setTitle("Ative o GPS")
+        builder.setMessage("Se o GPS estiver ativado, consulte se o Método de localização está em Alta precisão!")
+        builder.setCancelable(false)
+        builder.setPositiveButton("SIM") { dialog, _ ->
+                // startActivityForResult(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS), 11)
+                startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                dialog.dismiss()
+            }
+            .setNegativeButton("NÃO") { dialog, _ ->
+                dialog.cancel()
+            }
+        val alert: AlertDialog = builder.create()
+        alert.show()
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun alertFineLocationDenied() {
+        AlertDialog.Builder(this)
+            .setCancelable(false)
+            .setTitle("Permissão Local negada por você")
+            .setMessage("Para fins de REGISTRO neste aplicativo, é necessário fornecer a " +
+                    "localização de forma estável. Por gentileza, toque em SIM para informar a cidade e o País de onde está localizado.")
+            .setNegativeButton("NÃO") { dialog, _ ->
+                dialog.dismiss()
+                //bindingRegister.textViewAddressFull.text = "Sem sua permissão LOCAL, a tentativa de registro havará falhas"
+            }
+            .setPositiveButton("SIM") { dialog, _ ->
+                callPermissionFineLocation()
+                dialog.dismiss()
+            }.show()
+        // Apenas negou
+        Toast.makeText(this, "ACCESS_FINE_LOCATION - APENAS NEGOU", Toast.LENGTH_SHORT).show()
+        // show permission snackbar
+    }
+
+    private fun callPermissionFineLocation() {
+        ActivityCompat.requestPermissions(this@MainActivity, arrayOf(ACCESS_FINE_LOCATION), permissionIdFineLocation)
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun alertFineLocationDeniedDefinitely() {
+        AlertDialog.Builder(this)
+            .setCancelable(false)
+            .setTitle("Permissão de LOCATION está negada definitivamente")
+            .setMessage(
+                "O sistema do google requer que você vá MANUALMENTE " +
+                        "permitir esta funcionalidade para cede acesso de sua localização. \n\n" +
+                        "* TOQUE EM CONFIGURAÇÕES. \n  * Procure por PERMISSÕES e toque. \n" +
+                        "* para ativar a opção Local (Location). \n."
+            )
+            .setPositiveButton("CONFIGURAÇÕES") { dialog, _ ->
+                showIntentActionsSettingsLocal()
+                dialog.dismiss()
+            }
+            .setNegativeButton("SAIR") { dialog, _ ->
+                dialog.dismiss()
+                //bindingRegister.textViewAddressFull.text = "Checar manualmente se a permissão Location está habilitada em Settings do App"
+            }.show()
+        // Não perguntar novamente
+        //bindingRegister.textViewAddressFull.text = "* AVISO IMPORTANTE: \n\n " + "A permissão LOCAL esteve negada definitivamente por você."
+        Toast.makeText(this, "ACCESS_FINE_LOCATION - NÃO PERGUNTAR NOVAMENTE", Toast.LENGTH_SHORT).show()
+    }
+
+    // mostrar intent de ativaçaõ manual do Local(Location)
+    private fun showIntentActionsSettingsLocal() {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", packageName, null)
+        })
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Toast.makeText(this, "MainActivity - on RESUME", Toast.LENGTH_SHORT).show()
+    }
+
+    override fun onRestart() {
+        super.onRestart()
+        registerActivity.launch(arrayOf(ACCESS_FINE_LOCATION))
+        Toast.makeText(this, "MainActivity - on RESTART", Toast.LENGTH_SHORT).show()
+    }
+
+}
+
+---------------------------------------------------------------------------
+
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:padding="12dp"
+    android:orientation="vertical"
+    tools:context=".MainActivity">
+
+    <TextView
+        android:id="@+id/textViewStatusRel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_above="@+id/getpos"
+        android:layout_marginBottom="8dp"
+        android:text="Status do relacionamento"
+        android:textColor="@color/black"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        tools:ignore="HardcodedText" />
+
+    <TextView
+        android:id="@+id/textViewCityCountry"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@+id/getpos"
+        android:layout_marginTop="12dp"
+        android:text="Cidade: "
+        android:textColor="@color/black"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        tools:ignore="HardcodedText" />
+
+    <Button
+        android:id="@+id/getpos"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:backgroundTint="@color/black"
+        android:text="getpos"
+        android:textColor="@color/white"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        tools:ignore="HardcodedText" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal"
+        tools:ignore="UselessParent">
+
+        <TextView
+            android:id="@+id/textViewSbdInt"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Sdk!"
+            android:textColor="@color/black"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            tools:ignore="HardcodedText" />
+
+    </LinearLayout>
+
+</RelativeLayout>
+
